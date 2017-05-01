@@ -89,7 +89,6 @@ cmake
 configure
 docs
 examples
-include
 
 lib/*
 !lib/Transforms/
@@ -103,12 +102,10 @@ lib/Transforms/*
 !lib/Transforms/TryCatch
 !lib/Transforms/TryCatch/*
 
-
 projects
 resources
 runtimes
 test
-tools
 utils
 unittests
 
