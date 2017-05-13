@@ -110,7 +110,7 @@ namespace {
 			//Constant* fakeFunc = M.getFunction("fakeFunc");
 			Constant* lookupFunc = M.getFunction("tableLookup");
 
-			auto lookupTableExtern = M.getNamedValue("lookup_table");
+			//auto lookupTableExtern = M.getNamedValue("lookup_table");
 			//lookupTableExtern->removeFromParent();
 			
 
@@ -144,16 +144,40 @@ namespace {
 							user->dump();
 							errs() << "\n";
 
-							// TODO: remove duplicates...
+							// TODO: remove
 							for (auto ci = user->use_begin(), ce = user->use_end(); ci != ce; ++ci)
 							{
+								ci->getUser()->dump();
+							}
+
+							for (auto ci = user->user_begin(), ce = user->user_end(); ci != ce; ++ci)
+							{
 								//constExp->use
-								auto constUser = ci->getUser();
-								constUser->dump();
+								auto constUser = ci;// ->getUser();
+								//constUser->dump();
 								//if(constUser->use)
-								if (Instruction* constInst = dyn_cast<Instruction>(constUser))
+								if (auto constInst = dyn_cast<Instruction>(*constUser))
 								{
 									constInst->dump();
+
+									// Hacky way to not create duplicates...
+									unsigned int count = constInst->getNumOperands();
+									unsigned int opIndex = 0;
+									bool foundUse = false;
+									while (opIndex < count)
+									{
+										auto currOp = constInst->getOperand(opIndex);
+										if (currOp == user)
+										{
+											foundUse = true;
+										}
+										++opIndex;
+									}
+									if (!foundUse)
+									{
+										break;
+									}
+
 									// Save the string. We only care about it if we get to this point...
 									// TODO: Consider improving this
 									foundStrings.push_back(strData);
@@ -267,11 +291,31 @@ namespace {
 			lookupTable->setAlignment(4);
 
 			// Use new table in lookup, remove old
+			/*for (auto ltei = lookupTableExtern->use_begin(), ltee = lookupTableExtern->use_end(); ltei != ltee; ++ltei)
+			{
+				auto U = ltei->getUser();
+				U->dump();
+
+				if (auto inst = dyn_cast<Instruction>(U))
+				{
+					unsigned int count = inst->getNumOperands();
+					unsigned int opIndex = 0;
+					while (opIndex < count)
+					{
+						auto currOp = inst->getOperand(opIndex);
+						if (currOp == lookupTableExtern)
+						{
+							inst->setOperand(opIndex, lookupTable);
+						}
+						++opIndex;
+					}
+				}
+			}
 			while (!lookupTableExtern->use_empty()) {
-				auto &U = *lookupTableExtern->use_begin();
+				auto& U = *lookupTableExtern->use_begin();
 				U.set(lookupTable);
 			}
-			lookupTableExtern->eraseFromParent();
+			lookupTableExtern->eraseFromParent();*/
 
 			for (NamedMDNode& meta : M.named_metadata())
 			{
