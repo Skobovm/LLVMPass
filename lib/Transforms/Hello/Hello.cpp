@@ -94,12 +94,14 @@ namespace {
 		static char ID; // Pass identification, replacement for typeid
 		Hello3() : ModulePass(ID) {}
 
-		std::map<StringRef, int> wordMap;
-		int wordIndex = 0;
+		std::map<StringRef, unsigned int> wordMap;
+		unsigned int wordIndex = 0;
 
-		std::vector<int> getComponentsFromString(StringRef text)
+		// Splits the string into space-delimited tokens and inserts into wordMap, returning word indices that
+		// are used to call the string lookup function
+		std::vector<unsigned int> getComponentsFromString(StringRef text)
 		{
-			std::vector<int> retVector;
+			std::vector<unsigned int> retVector;
 
 			while (!text.empty())
 			{
@@ -137,7 +139,10 @@ namespace {
 			// Get the function to call from our runtime library.
 			// This will be the func that fills text
 			LLVMContext& Ctx = M.getContext();
-			Constant* lookupFunc = M.getFunction("tableLookup");
+
+			// Leave for reference
+			//Constant* lookupFunc = M.getFunction("tableLookup");
+			
 
 			for (auto& global : M.globals())
 			{
@@ -175,12 +180,6 @@ namespace {
 							user->dump();
 							errs() << "\n";
 
-							// TODO: remove
-							for (auto ci = user->use_begin(), ce = user->use_end(); ci != ce; ++ci)
-							{
-								ci->getUser()->dump();
-							}
-
 							for (auto ci = user->user_begin(), ce = user->user_end(); ci != ce; ++ci)
 							{
 								//constExp->use
@@ -209,15 +208,14 @@ namespace {
 										break;
 									}
 
-									std::vector<int> wordComponents = getComponentsFromString(strData);
+									std::vector<unsigned int> wordComponents = getComponentsFromString(strData);
 									// Save the string. We only care about it if we get to this point...
 									// TODO: Consider improving this
 									foundStrings.push_back(strData);
 
 									auto instParent = constInst->getParent();
 									if (instParent != nullptr)
-									{
-										instParent->dump();
+									{										
 										errs() << "Building IR\n";
 										IRBuilder<> builder(instParent);
 
@@ -226,24 +224,53 @@ namespace {
 										AllocaInst* allocInst = new AllocaInst(arrayType, 0, "strHolder");
 										instParent->getInstList().push_front(allocInst);
 
+										// TODO: These function calls should be next to the function that uses them, rather than next to the alloc
+										// Insert immediately before instruction that uses the string
+										auto nextNode = allocInst->getNextNode();
+										builder.SetInsertPoint(nextNode);
 
+										// Find the nearest debug location
+										DebugLoc debugLoc;
+										for (auto beginInst = instParent->getInstList().begin(), endInst = instParent->getInstList().end(); beginInst != endInst; beginInst++)
+										{
+											auto currLoc = beginInst->getDebugLoc();
+											if (currLoc.get() != nullptr)
+											{
+												debugLoc = currLoc;
+												break;
+											}
+										}
+										builder.SetCurrentDebugLocation(debugLoc);
 
-										//allocInst->get
-										//GetElementPtrInst::Create(IntegerType::getInt8PtrTy(M.getContext()), allocInst, )
+										// Create array to hold the word indices
+										Constant *wordIndexArray = ConstantDataArray::get(M.getContext(), wordComponents); //::getString(M.global_begin()->getContext(), str, true /*addNull*/);
+										GlobalVariable* wordIndexVar = new GlobalVariable(/*Module=*/M,
+											/*Type=*/wordIndexArray->getType(),
+											/*isConstant=*/true,
+											/*Linkage=*/GlobalValue::InternalLinkage,
+											/*Initializer=*/wordIndexArray,
+											/*Name=*/".wordIndexGlobal");
+										wordIndexVar->setAlignment(4);
 
-										// Insert before this block
-										// TODO: Is there a cleaner way to do this?
-										builder.SetInsertPoint(instParent, --(--builder.GetInsertPoint()));
+										Value* wordIndexIL[2] = { ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0), ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0) };
 
 										// This indexList is necessary... need to find out why...
 										Value* indexList[2] = { ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0), ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0) };
 										auto createdRef = builder.CreateGEP(allocInst, indexList, "arrayRef");
-										// TODO: Insert call to real fill function
-										//builder.CreateCall(fakeFunc);
+										auto wordIndexPtr = builder.CreateGEP(wordIndexVar, indexList, "wordIndexRef");
 
+										// This was the old table type. Leave for future reference
 										// Use foundStrings size to determine the correct index
-										Value* argList[2] = { createdRef, ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), foundStrings.size() - 1) };
-										builder.CreateCall(lookupFunc, argList);
+										//Value* argList[2] = { createdRef, ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), foundStrings.size() - 1) };
+										//builder.CreateCall(lookupFunc, argList);
+										
+										// Use wordIndexVar to create a call to compressed string lookup func
+										Constant* lookupFuncCompressed = M.getFunction("tableLookupSpace");
+										Value* argListCompressed[3] = { createdRef, wordIndexPtr, ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), wordComponents.size()) };
+										auto callInst = builder.CreateCall(lookupFuncCompressed, argListCompressed);
+
+										callInst->dump();
+										instParent->dump();
 
 										unsigned int count = constInst->getNumOperands();
 										unsigned int opIndex = 0;
@@ -293,10 +320,50 @@ namespace {
 				global->eraseFromParent();
 			}
 
-			std::vector<Constant*> globalConsts;
+			// This is the old table type. Leave for future reference!
 
-			// Create the global data structure that will hold strings and the strings themselves
-			for (auto str : foundStrings)
+			//std::vector<Constant*> globalConsts;
+			
+			//// Create the global data structure that will hold strings and the strings themselves
+			//for (auto str : foundStrings)
+			//{
+			//	Constant *constString = ConstantDataArray::getString(M.global_begin()->getContext(), str, true /*addNull*/);
+			//	GlobalVariable* globalStr = new GlobalVariable(/*Module=*/M,
+			//		/*Type=*/constString->getType(),
+			//		/*isConstant=*/true,
+			//		/*Linkage=*/GlobalValue::PrivateLinkage,
+			//		/*Initializer=*/constString,
+			//		/*Name=*/".newStr");
+			//	globalStr->setAlignment(1);
+
+			//	Value* indexList[2] = { ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0), ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0) };
+			//	auto constPtr = ConstantExpr::getGetElementPtr(globalStr->getInitializer()->getType(), globalStr, indexList, true);
+			//	globalConsts.push_back(constPtr);
+			//}
+
+			//ArrayType* arrayType = ArrayType::get(IntegerType::getInt8PtrTy(M.getContext()), globalConsts.size());
+			//Constant *tableData = ConstantArray::get(arrayType, globalConsts);
+
+			//GlobalVariable* lookupTable = new GlobalVariable(/*Module=*/M,
+			//	/*Type=*/tableData->getType(),
+			//	/*isConstant=*/true,
+			//	/*Linkage=*/GlobalValue::ExternalLinkage,
+			//	/*Initializer=*/tableData, // set later
+			//	/*Name=*/"lookup_table");
+			//lookupTable->setAlignment(4);
+
+
+			// Create the compressed string lookup table
+			std::vector<Constant*> compressedGlobalConsts;
+
+			// Insert the words in order
+			std::vector<StringRef> compressedWords(wordMap.size());
+			for (auto word : wordMap)
+			{
+				compressedWords[word.second] = word.first;
+			}
+
+			for (auto str : compressedWords)
 			{
 				Constant *constString = ConstantDataArray::getString(M.global_begin()->getContext(), str, true /*addNull*/);
 				GlobalVariable* globalStr = new GlobalVariable(/*Module=*/M,
@@ -304,24 +371,24 @@ namespace {
 					/*isConstant=*/true,
 					/*Linkage=*/GlobalValue::PrivateLinkage,
 					/*Initializer=*/constString,
-					/*Name=*/".newStr");
+					/*Name=*/".compStr");
 				globalStr->setAlignment(1);
 
 				Value* indexList[2] = { ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0), ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0) };
 				auto constPtr = ConstantExpr::getGetElementPtr(globalStr->getInitializer()->getType(), globalStr, indexList, true);
-				globalConsts.push_back(constPtr);
+				compressedGlobalConsts.push_back(constPtr);
 			}
 
-			ArrayType* arrayType = ArrayType::get(IntegerType::getInt8PtrTy(M.getContext()), globalConsts.size());
-			Constant *tableData = ConstantArray::get(arrayType, globalConsts);
+			ArrayType* arrType = ArrayType::get(IntegerType::getInt8PtrTy(M.getContext()), compressedGlobalConsts.size());
+			Constant *compressedData = ConstantArray::get(arrType, compressedGlobalConsts);
 
-			GlobalVariable* lookupTable = new GlobalVariable(/*Module=*/M,
-				/*Type=*/tableData->getType(),
+			GlobalVariable* compressedLookupTable = new GlobalVariable(/*Module=*/M,
+				/*Type=*/compressedData->getType(),
 				/*isConstant=*/true,
 				/*Linkage=*/GlobalValue::ExternalLinkage,
-				/*Initializer=*/tableData, // set later
-				/*Name=*/"lookup_table");
-			lookupTable->setAlignment(4);
+				/*Initializer=*/compressedData, // set later
+				/*Name=*/"lookup_table_compressed");
+			compressedLookupTable->setAlignment(4);
 
 			for (NamedMDNode& meta : M.named_metadata())
 			{
@@ -335,17 +402,23 @@ namespace {
 				errs() << "\n";
 				func.dump();
 				errs() << "\n";
+			}
+
+			for (auto& func : M.functions())
+			{
+				errs() << func.getName();
+				errs() << "\n";
+				func.dump();
+				errs() << "\n";
 
 				for (auto& bb : func)
 				{
-					//IRBuilder<> builder(bb.getContext());
-					//builder.CreateAlloca(Type::getInt8Ty(bb.getContext()), ConstantInt::get(IntegerType::getScalarType(), 10, false), "");
 					for (auto& inst : bb)
 					{
 						errs() << "Instruction:\n";
 						inst.dump();
 						errs() << "\n";
-						//auto* opList = inst.getOperandList();
+
 						unsigned int count = inst.getNumOperands();
 						unsigned int i = 0;
 						while (i < count)
