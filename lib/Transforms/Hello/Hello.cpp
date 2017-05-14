@@ -94,25 +94,50 @@ namespace {
 		static char ID; // Pass identification, replacement for typeid
 		Hello3() : ModulePass(ID) {}
 
+		std::map<StringRef, int> wordMap;
+		int wordIndex = 0;
+
+		std::vector<int> getComponentsFromString(StringRef text)
+		{
+			std::vector<int> retVector;
+
+			while (!text.empty())
+			{
+				std::pair<StringRef, StringRef> splitText = text.split(" ");
+
+				// Check wordMap for first part
+				auto search = wordMap.find(splitText.first);
+				if (search != wordMap.end())
+				{
+					// Found this word, use its index
+					retVector.push_back(search->second);
+				}
+				else
+				{
+					// Did not find this word, insert into table
+					wordMap.insert({ splitText.first, wordIndex });
+					retVector.push_back(wordIndex);
+					wordIndex++;
+				}
+
+				// Keep splitting if we have more
+				text = splitText.second;
+			}
+			return retVector;
+		}
+
 		bool runOnModule(Module &M) override {
 			bool moduleModified = false;
 			bool removeCurrentGlobal = false;
+			int currentWordIndex = 0;
 
 			std::vector<StringRef> foundStrings;
 			std::vector<GlobalVariable*> globalRemoveList;
 
 			// Get the function to call from our runtime library.
-			// TODO: This will be the func that fills text
+			// This will be the func that fills text
 			LLVMContext& Ctx = M.getContext();
-			/*Constant* fakeFunc = M.getOrInsertFunction(
-				"fakeFunc", FunctionType::getVoidTy(Ctx), Type::getInt32Ty(Ctx), NULL
-			);*/
-			//Constant* fakeFunc = M.getFunction("fakeFunc");
 			Constant* lookupFunc = M.getFunction("tableLookup");
-
-			//auto lookupTableExtern = M.getNamedValue("lookup_table");
-			//lookupTableExtern->removeFromParent();
-			
 
 			for (auto& global : M.globals())
 			{
@@ -178,6 +203,7 @@ namespace {
 										break;
 									}
 
+									std::vector<int> wordComponents = getComponentsFromString(strData);
 									// Save the string. We only care about it if we get to this point...
 									// TODO: Consider improving this
 									foundStrings.push_back(strData);
@@ -289,33 +315,6 @@ namespace {
 				/*Initializer=*/tableData, // set later
 				/*Name=*/"lookup_table");
 			lookupTable->setAlignment(4);
-
-			// Use new table in lookup, remove old
-			/*for (auto ltei = lookupTableExtern->use_begin(), ltee = lookupTableExtern->use_end(); ltei != ltee; ++ltei)
-			{
-				auto U = ltei->getUser();
-				U->dump();
-
-				if (auto inst = dyn_cast<Instruction>(U))
-				{
-					unsigned int count = inst->getNumOperands();
-					unsigned int opIndex = 0;
-					while (opIndex < count)
-					{
-						auto currOp = inst->getOperand(opIndex);
-						if (currOp == lookupTableExtern)
-						{
-							inst->setOperand(opIndex, lookupTable);
-						}
-						++opIndex;
-					}
-				}
-			}
-			while (!lookupTableExtern->use_empty()) {
-				auto& U = *lookupTableExtern->use_begin();
-				U.set(lookupTable);
-			}
-			lookupTableExtern->eraseFromParent();*/
 
 			for (NamedMDNode& meta : M.named_metadata())
 			{
