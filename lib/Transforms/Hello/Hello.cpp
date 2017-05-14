@@ -158,6 +158,12 @@ namespace {
 					if (data != nullptr)
 					{
 						auto* type = constant->getType();
+
+						// Sloppy AD. Refactor later
+						if (!data->isCString())
+						{
+							continue;
+						}
 						auto strData = data->getAsCString(); // OR getAsString
 						errs() << "String: ";
 						errs() << strData.str().c_str();
@@ -215,10 +221,11 @@ namespace {
 										errs() << "Building IR\n";
 										IRBuilder<> builder(instParent);
 
-										// Create an array
+										// Create an array to hold the word
 										ArrayType* arrayType = ArrayType::get(IntegerType::getInt8Ty(M.getContext()), strData.size());
 										AllocaInst* allocInst = new AllocaInst(arrayType, 0, "strHolder");
 										instParent->getInstList().push_front(allocInst);
+
 
 
 										//allocInst->get
