@@ -27,6 +27,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Hello.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Analysis/CaptureTracking.h"
 
 using namespace llvm;
 
@@ -162,13 +163,12 @@ namespace {
 					ConstantDataArray* data = dyn_cast<ConstantDataArray>(constant);
 					if (data != nullptr)
 					{
-						auto* type = constant->getType();
-
-						// Sloppy AD. Refactor later
+						// Sloppy AF. Refactor later
 						if (!data->isCString())
 						{
 							continue;
 						}
+
 						auto strData = data->getAsCString(); // OR getAsString
 						errs() << "String: ";
 						errs() << strData.str().c_str();
@@ -182,13 +182,13 @@ namespace {
 
 							for (auto ci = user->user_begin(), ce = user->user_end(); ci != ce; ++ci)
 							{
-								//constExp->use
-								auto constUser = ci;// ->getUser();
-								//constUser->dump();
-								//if(constUser->use)
+								auto constUser = ci;
 								if (auto constInst = dyn_cast<Instruction>(*constUser))
 								{
 									constInst->dump();
+
+									// Check for capture on user - it is the pointer referencing the data
+									//bool pointerMayBeCaptured = PointerMayBeCaptured(user, false, true);
 
 									// Hacky way to not create duplicates...
 									unsigned int count = constInst->getNumOperands();
@@ -243,7 +243,7 @@ namespace {
 										builder.SetCurrentDebugLocation(debugLoc);
 
 										// Create array to hold the word indices
-										Constant *wordIndexArray = ConstantDataArray::get(M.getContext(), wordComponents); //::getString(M.global_begin()->getContext(), str, true /*addNull*/);
+										Constant *wordIndexArray = ConstantDataArray::get(M.getContext(), wordComponents); 
 										GlobalVariable* wordIndexVar = new GlobalVariable(/*Module=*/M,
 											/*Type=*/wordIndexArray->getType(),
 											/*isConstant=*/true,
@@ -251,8 +251,6 @@ namespace {
 											/*Initializer=*/wordIndexArray,
 											/*Name=*/".wordIndexGlobal");
 										wordIndexVar->setAlignment(4);
-
-										Value* wordIndexIL[2] = { ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0), ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0) };
 
 										// This indexList is necessary... need to find out why...
 										Value* indexList[2] = { ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0), ConstantInt::get(IntegerType::getInt32Ty(M.getContext()), 0) };
